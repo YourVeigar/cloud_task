@@ -1,7 +1,7 @@
 package handler
 
 import (
-	"cloud-test-task/dto"
+	"cloud-test-task/model"
 	"cloud-test-task/rateLimiter"
 	"cloud-test-task/service"
 	"encoding/json"
@@ -13,30 +13,28 @@ import (
 
 // ConfigHandler отвечает за обработку HTTP-запросов для управления конфигурациями токен-бакетов
 type ConfigHandler struct {
-	s  service.ConfigService
-	rl *rateLimiter.RateLimiter
+	rateLimiter   *rateLimiter.RateLimiter
+	configService service.ConfigService
 }
 
 // NewConfigHandler создаёт новый экземпляр обработчика конфигураций.
-func NewConfigHandler(s service.ConfigService, rl *rateLimiter.RateLimiter) *ConfigHandler {
-	return &ConfigHandler{s: s, rl: rl}
+func NewConfigHandler(configService service.ConfigService, rateLimiter *rateLimiter.RateLimiter) *ConfigHandler {
+	return &ConfigHandler{configService: configService, rateLimiter: rateLimiter}
 }
 
 // Create обрабатывает запрос на создание нового бакета
 func (h *ConfigHandler) Create(w http.ResponseWriter, r *http.Request) {
-	var cfg dto.ConfigDto
+	var cfg model.UpdateConfigRequest
 
 	if err := json.NewDecoder(r.Body).Decode(&cfg); err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		w.Write([]byte("Invalid request body"))
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
 
 	interval, err := time.ParseDuration(cfg.RefillInterval)
 	if err != nil {
 		log.Printf("[ERROR] failed to parse duration: %v", err)
-		w.WriteHeader(http.StatusBadRequest)
-		w.Write([]byte("Failed to parse duration: " + err.Error()))
+		http.Error(w, "Failed to parse duration: "+err.Error(), http.StatusBadRequest)
 		return
 	}
 
@@ -46,34 +44,32 @@ func (h *ConfigHandler) Create(w http.ResponseWriter, r *http.Request) {
 		RefillInterval: interval,
 	}
 
-	if err := h.s.Create(bucket); err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		w.Write([]byte(err.Error()))
+	if err := h.configService.Create(bucket); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	if err := h.rl.AddBucket(bucket); err != nil {
-		_ = h.s.Delete(bucket.ClientId) // Откат в случае ошибки
-		w.WriteHeader(http.StatusBadRequest)
-		w.Write([]byte(err.Error()))
+	if err := h.rateLimiter.AddBucket(bucket); err != nil {
+		_ = h.configService.Delete(bucket.ClientId) // Откат в случае ошибки
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
 	w.WriteHeader(http.StatusCreated)
-	w.Write([]byte(fmt.Sprintf("%+v", bucket)))
+	_, _ = w.Write([]byte(fmt.Sprintf("%+v", bucket)))
 }
 
 // GetAll возвращает список всех конфигураций бакетов
 func (h *ConfigHandler) GetAll(w http.ResponseWriter, r *http.Request) {
-	configs := h.rl.GetAllBucketConfigs()
+	configs := h.rateLimiter.GetAllBucketConfigs()
+
+	if err := json.NewEncoder(w).Encode(configs); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-
-	if err := json.NewEncoder(w).Encode(configs); err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		w.Write([]byte(err.Error()))
-	}
 }
 
 // GetById возвращает конфигурацию бакета по clientId
@@ -84,37 +80,34 @@ func (h *ConfigHandler) GetById(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	config, err := h.rl.GetBucketConfig(clientId)
+	config, err := h.rateLimiter.GetBucketConfig(clientId)
 	if err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		w.Write([]byte(err.Error()))
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	if err := json.NewEncoder(w).Encode(config); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-
-	if err := json.NewEncoder(w).Encode(config); err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		w.Write([]byte(err.Error()))
-	}
 }
 
 // Update обновляет параметры конфигурации существующего бакета
 func (h *ConfigHandler) Update(w http.ResponseWriter, r *http.Request) {
-	var cfg dto.ConfigDto
+	var cfg model.UpdateConfigRequest
 
 	if err := json.NewDecoder(r.Body).Decode(&cfg); err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		w.Write([]byte("Invalid request body"))
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
 
 	interval, err := time.ParseDuration(cfg.RefillInterval)
 	if err != nil {
 		log.Printf("[ERROR] failed to parse duration: %v", err)
-		w.WriteHeader(http.StatusBadRequest)
-		w.Write([]byte("Failed to parse duration"))
+		http.Error(w, fmt.Sprintf("Failed to parse duration: %v", err.Error()), http.StatusBadRequest)
 		return
 	}
 
@@ -124,48 +117,41 @@ func (h *ConfigHandler) Update(w http.ResponseWriter, r *http.Request) {
 		RefillInterval: interval,
 	}
 
-	if err := h.s.Update(bucket); err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		w.Write([]byte(err.Error()))
+	if err := h.configService.Update(bucket); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	if err := h.rl.AddBucket(bucket); err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		w.Write([]byte(err.Error()))
+	if err := h.rateLimiter.AddBucket(bucket); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	if err := json.NewEncoder(w).Encode(bucket); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-
-	if err := json.NewEncoder(w).Encode(bucket); err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		w.Write([]byte(err.Error()))
-	}
 }
 
 // Delete удаляет конфигурацию и соответствующий бакет по clientId
 func (h *ConfigHandler) Delete(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		ClientId string `json:"client_id"`
-	}
+	var req model.DeleteConfigRequest
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		w.Write([]byte("Invalid request body"))
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
 
-	if err := h.rl.DeleteBucket(req.ClientId); err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		w.Write([]byte(err.Error()))
+	if err := h.rateLimiter.DeleteBucket(req.ClientId); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
-	if err := h.s.Delete(req.ClientId); err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		w.Write([]byte(err.Error()))
+	if err := h.configService.Delete(req.ClientId); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 

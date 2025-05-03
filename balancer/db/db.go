@@ -24,8 +24,16 @@ func NewDB(uri string) (*sql.DB, error) {
 		return nil, fmt.Errorf("failed to ping database: %v", err)
 	}
 
+	if err = autoMigrate(db); err != nil {
+		return nil, err
+	}
+
+	return db, nil
+}
+
+func autoMigrate(db *sql.DB) error {
 	// Создаём таблицу client_configs, если она ещё не существует
-	_, err = db.Exec(`
+	_, err := db.Exec(`
 		CREATE TABLE IF NOT EXISTS client_configs (
 			client_id TEXT PRIMARY KEY,
 			capacity INTEGER NOT NULL,
@@ -33,8 +41,7 @@ func NewDB(uri string) (*sql.DB, error) {
 		)
 	`)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create client_configs table: %v", err)
+		return fmt.Errorf("failed to create client_configs table: %v", err)
 	}
-
-	return db, nil
+	return nil
 }

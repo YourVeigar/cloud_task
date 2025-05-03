@@ -27,7 +27,7 @@ func NewConfigRepo(db *sql.DB) ConfigRepo {
 
 // Create вставляет новую конфигурацию клиента
 func (r *configRepo) Create(cfg rateLimiter.TokenBucketConfig) error {
-	query := `INSERT INTO client_configs (client_id, capacity, refill_interval) VALUES ($1, $2, $3)`
+	const query = `INSERT INTO client_configs (client_id, capacity, refill_interval) VALUES ($1, $2, $3)`
 	if _, err := r.db.Exec(query, cfg.ClientId, cfg.Capacity, cfg.RefillInterval); err != nil {
 		log.Printf("[ERROR] failed to insert config: %v", err)
 		return err
@@ -38,7 +38,7 @@ func (r *configRepo) Create(cfg rateLimiter.TokenBucketConfig) error {
 // FindByClientID получает конфигурацию по ID клиента
 func (r *configRepo) FindByClientID(clientId string) (rateLimiter.TokenBucketConfig, error) {
 	var cfg rateLimiter.TokenBucketConfig
-	query := `SELECT client_id, capacity, refill_interval FROM client_configs WHERE client_id = $1`
+	const query = `SELECT client_id, capacity, refill_interval FROM client_configs WHERE client_id = $1`
 	if err := r.db.QueryRow(query, clientId).Scan(&cfg.ClientId, &cfg.Capacity, &cfg.RefillInterval); err != nil {
 		log.Printf("[ERROR] failed to fetch config for %s: %v", clientId, err)
 		return cfg, err
@@ -48,7 +48,7 @@ func (r *configRepo) FindByClientID(clientId string) (rateLimiter.TokenBucketCon
 
 // Update обновляет существующую конфигурацию клиента
 func (r *configRepo) Update(cfg rateLimiter.TokenBucketConfig) error {
-	query := `UPDATE client_configs SET capacity = $1, refill_interval = $2 WHERE client_id = $3`
+	const query = `UPDATE client_configs SET capacity = $1, refill_interval = $2 WHERE client_id = $3`
 	if _, err := r.db.Exec(query, cfg.Capacity, cfg.RefillInterval, cfg.ClientId); err != nil {
 		log.Printf("[ERROR] failed to update config: %v", err)
 		return err
@@ -58,7 +58,7 @@ func (r *configRepo) Update(cfg rateLimiter.TokenBucketConfig) error {
 
 // Delete удаляет конфигурацию по ID клиента
 func (r *configRepo) Delete(clientId string) error {
-	query := `DELETE FROM client_configs WHERE client_id = $1`
+	const query = `DELETE FROM client_configs WHERE client_id = $1`
 	if _, err := r.db.Exec(query, clientId); err != nil {
 		log.Printf("[ERROR] failed to delete config for %s: %v", clientId, err)
 		return err
@@ -68,7 +68,7 @@ func (r *configRepo) Delete(clientId string) error {
 
 // ListAll возвращает все конфигурации клиентов
 func (r *configRepo) ListAll() ([]rateLimiter.TokenBucketConfig, error) {
-	query := `SELECT client_id, capacity, refill_interval FROM client_configs`
+	const query = `SELECT client_id, capacity, refill_interval FROM client_configs`
 	rows, err := r.db.Query(query)
 	if err != nil {
 		log.Printf("[ERROR] failed to list configs: %v", err)

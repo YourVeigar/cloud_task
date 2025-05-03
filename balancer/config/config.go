@@ -18,7 +18,7 @@ func LoadConfig() (*Config, error) {
 	}
 	return &Config{
 		Port:     viper.GetString("port"),
-		Backends: viper.GetStringSlice("backends"),
-		Db:       viper.GetString("db"),
+		Backends: viper.GetStringSlice("backend-servers"),
+		Db:       viper.GetString("db.url"),
 	}, nil
 }

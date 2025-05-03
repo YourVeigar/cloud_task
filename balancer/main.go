@@ -5,60 +5,21 @@ import (
 	"cloud-test-task/db"
 	"cloud-test-task/handler"
 	"cloud-test-task/loadBalancer"
+	"cloud-test-task/proxy"
 	"cloud-test-task/rateLimiter"
 	"cloud-test-task/repository"
 	"cloud-test-task/service"
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"log"
 	"net/http"
-	"net/http/httputil"
 	"net/url"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
 )
-
-// NewReverseProxy основная функция проксирования запросов
-// если в бакете для текущего клиента есть токены, то запросы передаются в него, если нет, то передаются на следующий сервер
-func NewReverseProxy(lb *loadbalancer.LoadBalancer) *httputil.ReverseProxy {
-	return &httputil.ReverseProxy{
-		Director: func(req *http.Request) {
-			backend, tokensEmpty := lb.NextBackend()
-			if backend == nil {
-				if tokensEmpty {
-					req.URL.Host = "rate-limited"
-					return
-				}
-				req.URL.Host = ""
-				return
-			}
-			req.URL.Scheme = backend.Url.Scheme
-			req.URL.Host = backend.Url.Host
-			log.Printf("Forwarding request to %v", backend.Url)
-		},
-		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
-			if r.URL.Host == "" {
-				w.WriteHeader(http.StatusBadGateway)
-				w.Write([]byte("Backends are not available"))
-			} else if len(r.URL.Host) > 1 {
-				w.WriteHeader(http.StatusTooManyRequests)
-				w.Write([]byte("Rate limit exceeded"))
-				log.Printf("[INFO] all buckets are empty")
-				return
-			} else {
-				w.WriteHeader(r.Response.StatusCode)
-				_, err := io.Copy(w, r.Response.Body)
-				if err != nil {
-					w.WriteHeader(http.StatusInternalServerError)
-				}
-			}
-		},
-	}
-}
 
 func main() {
 	// Загрузка конфигурации
@@ -84,7 +45,10 @@ func main() {
 	}
 
 	// Инициализация RateLimiter
-	rl := rateLimiter.NewRateLimiter(db)
+	rl, err := rateLimiter.NewRateLimiter(db)
+	if err != nil {
+		log.Fatal("Failed to init rate limiter: ", err.Error())
+	}
 
 	// Инициализация LoadBalancer
 	lb := &loadbalancer.LoadBalancer{
@@ -100,8 +64,8 @@ func main() {
 	mux := http.NewServeMux()
 
 	// Создание прокси для обработки запросов
-	proxy := NewReverseProxy(lb)
-	mux.Handle("/", proxy)
+	proxyHandler := proxy.NewReverseProxy(lb)
+	mux.Handle("/", proxyHandler)
 
 	// Инициализация репозитория и сервиса для обработки CRUD операций с лимитами
 	repo := repository.NewConfigRepo(db)
